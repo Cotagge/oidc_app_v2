@@ -53,7 +53,11 @@ const App: React.FC = () => {
     
     console.log('Auth URL:', authUrl);
     
-    // Pro demo simulujeme úspěšné přihlášení
+    // SKUTEČNÉ PŘIHLÁŠENÍ - přesměrování na Keycloak
+    window.location.href = authUrl;
+    
+    // Pro demo můžeš ponechat simulaci zakomentovanou:
+    /*
     setTimeout(() => {
       localStorage.setItem('access_token', 'demo-token-123');
       setIsAuthenticated(true);
@@ -63,6 +67,7 @@ const App: React.FC = () => {
         roles: ['user']
       });
     }, 1000);
+    */
   };
 
   const logout = (): void => {
