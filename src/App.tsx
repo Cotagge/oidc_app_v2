@@ -154,7 +154,7 @@ const App: React.FC = () => {
         `Vyžadována ACR úroveň ${requiredAcr}, máte ${userInfo?.acr}` :
         `Autentizace je příliš stará (max ${maxAge}s)`;
       
-      if (confirm(`🔒 ${reason}\n\nChcete provést step-up autentizaci?`)) {
+      if (window.confirm(`🔒 ${reason}\n\nChcete provést step-up autentizaci?`)) {
         requestStepUp(requiredAcr, maxAge);
       }
     }
@@ -278,7 +278,10 @@ const App: React.FC = () => {
               <h3>Chráněný obsah</h3>
               <p>Tento obsah je viditelný pouze po úspěšném přihlášení.</p>
               <div className="feature-grid">
-                <div className="feature-card blue" onClick={() => accessSensitiveArea('Dashboard')}>
+                <div 
+                  className="feature-card blue" 
+                  onClick={() => accessSensitiveArea('Dashboard', '1')}
+                >
                   <h4>Dashboard</h4>
                   <p>Přehled vašich dat</p>
                   <small>🔒 Základní přístup</small>
