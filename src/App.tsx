@@ -117,19 +117,19 @@ const App: React.FC = () => {
           <div className="login-container">
             <div className="login-card">
               <h2>Přihlášení vyžadováno</h2>
-              <p>Pro přístup do aplikace se musíte přihlásit pomocí Keycloak OIDC.</p>
+              <p>Pro přístup do aplikace se musíte přihlásit pomocí SkodaIDP</p>
               
               {process.env.NODE_ENV === 'development' && (
                 <div className="debug-info">
                   <h4>Debug informace:</h4>
-                  <div><strong>Keycloak URL:</strong> {KEYCLOAK_CONFIG.url}</div>
+                  <div><strong>SkodaIDP URL:</strong> {KEYCLOAK_CONFIG.url}</div>
                   <div><strong>Realm:</strong> {KEYCLOAK_CONFIG.realm}</div>
                   <div><strong>Client ID:</strong> {KEYCLOAK_CONFIG.clientId}</div>
                 </div>
               )}
               
               <button onClick={login} className="btn btn-primary btn-large">
-                🔐 Přihlásit přes Keycloak
+                🔐 Přihlásit přes SkodaIDP
               </button>
             </div>
           </div>
