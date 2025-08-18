@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import './App.css';
 
 // TypeScript interface pro uživatelské informace
@@ -31,50 +31,146 @@ const App: React.FC = () => {
     clientId: process.env.REACT_APP_KEYCLOAK_CLIENT_ID || 'your-client-id'
   };
 
-  useEffect(() => {
-    console.log('🚀 Aplikace se načítá...');
-    checkAuthStatus();
-    parseKeycloakCallback();
-  }, []);
-
-  // Zpracování návratu z Keycloak
-  const parseKeycloakCallback = (): void => {
-    const urlParams = new URLSearchParams(window.location.search);
-    const code = urlParams.get('code');
-    const error = urlParams.get('error');
-    
-    if (error) {
-      console.error('❌ Keycloak error:', error);
-      alert(`Chyba při přihlášení: ${error}`);
-      setLoading(false);
-      return;
-    }
-    
-    if (code) {
-      console.log('✅ Keycloak vrátil authorization code:', code);
+  // Získání user info z UserInfo endpointu (fallback)
+  const fetchUserInfo = useCallback(async (accessToken: string): Promise<void> => {
+    try {
+      console.log('👤 Získávám informace o uživateli...');
       
-      // Zkontroluj jestli už tento code nebyl použit
-      const usedCode = localStorage.getItem('used_auth_code');
-      if (usedCode === code) {
-        console.log('⚠️ Authorization code už byl použit - ignoruji');
+      const userInfoUrl = `${KEYCLOAK_CONFIG.url}/realms/${KEYCLOAK_CONFIG.realm}/protocol/openid-connect/userinfo`;
+      console.log('📡 UserInfo endpoint:', userInfoUrl);
+      
+      const userInfoResponse = await fetch(userInfoUrl, {
+        headers: {
+          'Authorization': `Bearer ${accessToken}`
+        }
+      });
+      
+      console.log('🔍 UserInfo response status:', userInfoResponse.status, userInfoResponse.statusText);
+      
+      if (!userInfoResponse.ok) {
+        const errorText = await userInfoResponse.text();
+        console.error('❌ UserInfo error response:', errorText);
+        throw new Error(`UserInfo request failed: ${userInfoResponse.status} ${userInfoResponse.statusText}`);
+      }
+      
+      const userData = await userInfoResponse.json();
+      console.log('✅ User info získány:', userData);
+      
+      setIsAuthenticated(true);
+      setUserInfo({
+        name: userData.name || `${userData.given_name || ''} ${userData.family_name || ''}`.trim() || userData.preferred_username || 'Neznámý uživatel',
+        email: userData.email || 'N/A',
+        preferred_username: userData.preferred_username || 'N/A',
+        given_name: userData.given_name || 'N/A',
+        family_name: userData.family_name || 'N/A',
+        sub: userData.sub || 'N/A',
+        roles: userData.realm_access?.roles || userData.groups || []
+      });
+      
+      // Ulož user info
+      localStorage.setItem('user_info', JSON.stringify({
+        name: userData.name || `${userData.given_name || ''} ${userData.family_name || ''}`.trim() || userData.preferred_username || 'Neznámý uživatel',
+        email: userData.email || 'N/A',
+        preferred_username: userData.preferred_username || 'N/A',
+        given_name: userData.given_name || 'N/A',
+        family_name: userData.family_name || 'N/A',
+        sub: userData.sub || 'N/A',
+        roles: userData.realm_access?.roles || userData.groups || []
+      }));
+      
+      console.log('🎉 Uživatel úspěšně přihlášen z UserInfo!');
+      
+      // Vyčisti URL
+      window.history.replaceState({}, document.title, window.location.pathname);
+      localStorage.removeItem('used_auth_code');
+      setLoading(false);
+      
+    } catch (error) {
+      console.error('❌ Chyba při získávání user info:', error);
+      const errorMessage = error instanceof Error ? error.message : 'Neznámá chyba';
+      
+      // Pro localhost development - použij fallback
+      if (window.location.hostname === 'localhost' && errorMessage.includes('401')) {
+        console.log('💡 CORS/401 chyba na localhost - používám fallback user info');
+        setIsAuthenticated(true);
+        setUserInfo({
+          name: 'Test Uživatel (Fallback)',
+          email: 'test@localhost.com',
+          preferred_username: 'test.user',
+          given_name: 'Test',
+          family_name: 'Uživatel',
+          sub: 'localhost-test-user',
+          roles: ['user']
+        });
+        
+        window.history.replaceState({}, document.title, window.location.pathname);
         setLoading(false);
         return;
       }
       
-      // Označ code jako použitý
-      localStorage.setItem('used_auth_code', code);
-      
-      // Vyměň code za token
-      exchangeCodeForToken(code);
-      return;
+      alert(`Chyba při získávání informací o uživateli: ${errorMessage}`);
+      setLoading(false);
     }
-    
-    // Pokud není ani code ani error, pokračuj normálně
-    setLoading(false);
-  };
+  }, [KEYCLOAK_CONFIG]);
+
+  // Parsování user info z ID tokenu
+  const parseUserInfoFromIdToken = useCallback((idToken: string): void => {
+    try {
+      // ID token je JWT - parsuj payload (prostřední část mezi tečkami)
+      const tokenParts = idToken.split('.');
+      if (tokenParts.length !== 3) {
+        throw new Error('Neplatný ID token formát');
+      }
+      
+      // Dekóduj base64 payload
+      const payload = JSON.parse(atob(tokenParts[1]));
+      console.log('🆔 ID token payload:', payload);
+      
+      setIsAuthenticated(true);
+      setUserInfo({
+        name: payload.name || `${payload.given_name || ''} ${payload.family_name || ''}`.trim() || payload.preferred_username || 'Neznámý uživatel',
+        email: payload.email || 'N/A',
+        preferred_username: payload.preferred_username || 'N/A',
+        given_name: payload.given_name || 'N/A',
+        family_name: payload.family_name || 'N/A',
+        sub: payload.sub || 'N/A',
+        roles: payload.realm_access?.roles || payload.groups || payload.roles || []
+      });
+      
+      // Ulož user info
+      localStorage.setItem('user_info', JSON.stringify({
+        name: payload.name || `${payload.given_name || ''} ${payload.family_name || ''}`.trim() || payload.preferred_username || 'Neznámý uživatel',
+        email: payload.email || 'N/A',
+        preferred_username: payload.preferred_username || 'N/A',
+        given_name: payload.given_name || 'N/A',
+        family_name: payload.family_name || 'N/A',
+        sub: payload.sub || 'N/A',
+        roles: payload.realm_access?.roles || payload.groups || payload.roles || []
+      }));
+      
+      console.log('🎉 Uživatel úspěšně přihlášen z ID tokenu!');
+      
+      // Vyčisti URL a použitý code
+      window.history.replaceState({}, document.title, window.location.pathname);
+      localStorage.removeItem('used_auth_code');
+      setLoading(false);
+      
+    } catch (error) {
+      console.error('❌ Chyba při parsování ID tokenu:', error);
+      console.log('🔄 Fallback na UserInfo endpoint...');
+      
+      // Fallback na UserInfo endpoint
+      const accessToken = localStorage.getItem('access_token');
+      if (accessToken) {
+        fetchUserInfo(accessToken);
+      } else {
+        setLoading(false);
+      }
+    }
+  }, [fetchUserInfo]);
 
   // Výměna code za token
-  const exchangeCodeForToken = async (code: string): Promise<void> => {
+  const exchangeCodeForToken = useCallback(async (code: string): Promise<void> => {
     try {
       console.log('🔄 Vyměňujem code za token...');
       
@@ -157,147 +253,45 @@ Keycloak detail: ${errorData.error_description}`);
       alert(`Chyba při dokončování přihlášení: ${errorMessage}`);
       setLoading(false);
     }
-  };
+  }, [KEYCLOAK_CONFIG, parseUserInfoFromIdToken, fetchUserInfo]);
 
-  // Parsování user info z ID tokenu
-  const parseUserInfoFromIdToken = (idToken: string): void => {
-    try {
-      // ID token je JWT - parsuj payload (prostřední část mezi tečkami)
-      const tokenParts = idToken.split('.');
-      if (tokenParts.length !== 3) {
-        throw new Error('Neplatný ID token formát');
-      }
-      
-      // Dekóduj base64 payload
-      const payload = JSON.parse(atob(tokenParts[1]));
-      console.log('🆔 ID token payload:', payload);
-      
-      setIsAuthenticated(true);
-      setUserInfo({
-        name: payload.name || `${payload.given_name || ''} ${payload.family_name || ''}`.trim() || payload.preferred_username || 'Neznámý uživatel',
-        email: payload.email || 'N/A',
-        preferred_username: payload.preferred_username || 'N/A',
-        given_name: payload.given_name || 'N/A',
-        family_name: payload.family_name || 'N/A',
-        sub: payload.sub || 'N/A',
-        roles: payload.realm_access?.roles || payload.groups || payload.roles || []
-      });
-      
-      // Ulož user info
-      localStorage.setItem('user_info', JSON.stringify({
-        name: payload.name || `${payload.given_name || ''} ${payload.family_name || ''}`.trim() || payload.preferred_username || 'Neznámý uživatel',
-        email: payload.email || 'N/A',
-        preferred_username: payload.preferred_username || 'N/A',
-        given_name: payload.given_name || 'N/A',
-        family_name: payload.family_name || 'N/A',
-        sub: payload.sub || 'N/A',
-        roles: payload.realm_access?.roles || payload.groups || payload.roles || []
-      }));
-      
-      console.log('🎉 Uživatel úspěšně přihlášen z ID tokenu!');
-      
-      // Vyčisti URL a použitý code
-      window.history.replaceState({}, document.title, window.location.pathname);
-      localStorage.removeItem('used_auth_code');
+  // Zpracování návratu z Keycloak
+  const parseKeycloakCallback = useCallback((): void => {
+    const urlParams = new URLSearchParams(window.location.search);
+    const code = urlParams.get('code');
+    const error = urlParams.get('error');
+    
+    if (error) {
+      console.error('❌ Keycloak error:', error);
+      alert(`Chyba při přihlášení: ${error}`);
       setLoading(false);
-      
-    } catch (error) {
-      console.error('❌ Chyba při parsování ID tokenu:', error);
-      console.log('🔄 Fallback na UserInfo endpoint...');
-      
-      // Fallback na UserInfo endpoint
-      const accessToken = localStorage.getItem('access_token');
-      if (accessToken) {
-        fetchUserInfo(accessToken);
-      } else {
-        setLoading(false);
-      }
+      return;
     }
-  };
-
-  // Získání user info z UserInfo endpointu (fallback)
-  const fetchUserInfo = async (accessToken: string): Promise<void> => {
-    try {
-      console.log('👤 Získávám informace o uživateli...');
+    
+    if (code) {
+      console.log('✅ Keycloak vrátil authorization code:', code);
       
-      const userInfoUrl = `${KEYCLOAK_CONFIG.url}/realms/${KEYCLOAK_CONFIG.realm}/protocol/openid-connect/userinfo`;
-      console.log('📡 UserInfo endpoint:', userInfoUrl);
-      
-      const userInfoResponse = await fetch(userInfoUrl, {
-        headers: {
-          'Authorization': `Bearer ${accessToken}`
-        }
-      });
-      
-      console.log('🔍 UserInfo response status:', userInfoResponse.status, userInfoResponse.statusText);
-      
-      if (!userInfoResponse.ok) {
-        const errorText = await userInfoResponse.text();
-        console.error('❌ UserInfo error response:', errorText);
-        throw new Error(`UserInfo request failed: ${userInfoResponse.status} ${userInfoResponse.statusText}`);
-      }
-      
-      const userData = await userInfoResponse.json();
-      console.log('✅ User info získány:', userData);
-      
-      setIsAuthenticated(true);
-      setUserInfo({
-        name: userData.name || `${userData.given_name || ''} ${userData.family_name || ''}`.trim() || userData.preferred_username || 'Neznámý uživatel',
-        email: userData.email || 'N/A',
-        preferred_username: userData.preferred_username || 'N/A',
-        given_name: userData.given_name || 'N/A',
-        family_name: userData.family_name || 'N/A',
-        sub: userData.sub || 'N/A',
-        roles: userData.realm_access?.roles || userData.groups || []
-      });
-      
-      // Ulož user info
-      localStorage.setItem('user_info', JSON.stringify({
-        name: userData.name || `${userData.given_name || ''} ${userData.family_name || ''}`.trim() || userData.preferred_username || 'Neznámý uživatel',
-        email: userData.email || 'N/A',
-        preferred_username: userData.preferred_username || 'N/A',
-        given_name: userData.given_name || 'N/A',
-        family_name: userData.family_name || 'N/A',
-        sub: userData.sub || 'N/A',
-        roles: userData.realm_access?.roles || userData.groups || []
-      }));
-      
-      console.log('🎉 Uživatel úspěšně přihlášen z UserInfo!');
-      
-      // Vyčisti URL
-      window.history.replaceState({}, document.title, window.location.pathname);
-      localStorage.removeItem('used_auth_code');
-      setLoading(false);
-      
-    } catch (error) {
-      console.error('❌ Chyba při získávání user info:', error);
-      const errorMessage = error instanceof Error ? error.message : 'Neznámá chyba';
-      
-      // Pro localhost development - použij fallback
-      if (window.location.hostname === 'localhost' && errorMessage.includes('401')) {
-        console.log('💡 CORS/401 chyba na localhost - používám fallback user info');
-        setIsAuthenticated(true);
-        setUserInfo({
-          name: 'Test Uživatel (Fallback)',
-          email: 'test@localhost.com',
-          preferred_username: 'test.user',
-          given_name: 'Test',
-          family_name: 'Uživatel',
-          sub: 'localhost-test-user',
-          roles: ['user']
-        });
-        
-        window.history.replaceState({}, document.title, window.location.pathname);
+      // Zkontroluj jestli už tento code nebyl použit
+      const usedCode = localStorage.getItem('used_auth_code');
+      if (usedCode === code) {
+        console.log('⚠️ Authorization code už byl použit - ignoruji');
         setLoading(false);
         return;
       }
       
-      alert(`Chyba při získávání informací o uživateli: ${errorMessage}`);
-      setLoading(false);
+      // Označ code jako použitý
+      localStorage.setItem('used_auth_code', code);
+      
+      // Vyměň code za token
+      exchangeCodeForToken(code);
+      return;
     }
-  };
+    
+    // Pokud není ani code ani error, pokračuj normálně
+    setLoading(false);
+  }, [exchangeCodeForToken]);
 
-  const checkAuthStatus = (): void => {
+  const checkAuthStatus = useCallback((): void => {
     console.log('🔍 Kontroluji stav přihlášení...');
     const token = localStorage.getItem('access_token');
     
@@ -324,8 +318,9 @@ Keycloak detail: ${errorData.error_description}`);
       }
     } else {
       console.log('❌ Žádný token nenalezen');
+      setLoading(false);
     }
-  };
+  }, [fetchUserInfo]); // Přidáno fetchUserInfo do dependencies
 
   const login = (): void => {
     console.log('🔐 Zahajuji přihlášení...');
@@ -370,6 +365,23 @@ Keycloak detail: ${errorData.error_description}`);
     window.location.reload();
   };
 
+  // useEffect pro inicializaci aplikace při načtení
+  useEffect(() => {
+    console.log('🚀 Aplikace se inicializuje...');
+    
+    // Nejdřív zkontroluj jestli jsou v URL parametry z Keycloak
+    const urlParams = new URLSearchParams(window.location.search);
+    const hasCallbackParams = urlParams.has('code') || urlParams.has('error');
+    
+    if (hasCallbackParams) {
+      console.log('🔄 Zpracovávám callback z Keycloak...');
+      parseKeycloakCallback();
+    } else {
+      console.log('🔍 Kontroluji existující přihlášení...');
+      checkAuthStatus();
+    }
+  }, [parseKeycloakCallback, checkAuthStatus]);
+
   if (loading) {
     return (
       <div className="loading-container">
@@ -411,12 +423,12 @@ Keycloak detail: ${errorData.error_description}`);
           <div className="login-container">
             <div className="login-card">
               <h2>Přihlášení vyžadováno</h2>
-              <p>Pro přístup do aplikace se musíte přihlásit pomocí SkodaIDP OIDC.</p>
+              <p>Pro přístup do aplikace se musíte přihlásit pomocí Keycloak OIDC.</p>
               
               {process.env.NODE_ENV === 'development' && (
                 <div className="debug-info">
                   <h4>Debug informace:</h4>
-                  <div><strong>SkodaIDP URL:</strong> {KEYCLOAK_CONFIG.url}</div>
+                  <div><strong>Keycloak URL:</strong> {KEYCLOAK_CONFIG.url}</div>
                   <div><strong>Realm:</strong> {KEYCLOAK_CONFIG.realm}</div>
                   <div><strong>Client ID:</strong> {KEYCLOAK_CONFIG.clientId}</div>
                   <div><strong>Scope:</strong> openid profile email roles</div>
@@ -425,7 +437,7 @@ Keycloak detail: ${errorData.error_description}`);
               )}
               
               <button onClick={login} className="btn btn-primary btn-large">
-                🔐 Přihlásit přes SkodaIDP
+                🔐 Přihlásit přes Keycloak
               </button>
               
               {process.env.NODE_ENV === 'development' && (
@@ -461,8 +473,8 @@ Keycloak detail: ${errorData.error_description}`);
               <p>Detaily o vaší aktuální OIDC relaci:</p>
               <div className="auth-details">
                 <div>✅ Autentizace: OIDC/OAuth 2.0</div>
-                <div>✅ Poskytovatel: {KEYCLOAK_CONFIG.url}</div>
-                <div>✅ Realm: {KEYCLOAK_CONFIG.realm}</div>
+                <div>✅ Poskytovatel: { KEYCLOAK_CONFIG.url } </div>
+                <div>✅ Realm: { KEYCLOAK_CONFIG.realm }</div>
                 <div>✅ Zabezpečení: SSL/TLS</div>
                 <div>✅ Session: Aktivní</div>
                 <div>✅ Token Type: Bearer</div>
