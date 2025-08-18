@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import './App.css';
 
 // TypeScript interface pro uživatelské informace
@@ -25,11 +25,11 @@ const App: React.FC = () => {
   const [loading, setLoading] = useState<boolean>(true);
 
   // Konfigurace pro Keycloak - použije environment variables
-  const KEYCLOAK_CONFIG: KeycloakConfig = {
+  const KEYCLOAK_CONFIG: KeycloakConfig = useMemo(() => ({
     url: process.env.REACT_APP_KEYCLOAK_URL || 'https://your-keycloak-server.com',
     realm: process.env.REACT_APP_KEYCLOAK_REALM || 'your-realm',
     clientId: process.env.REACT_APP_KEYCLOAK_CLIENT_ID || 'your-client-id'
-  };
+  }), []);
 
   // Získání user info z UserInfo endpointu (fallback)
   const fetchUserInfo = useCallback(async (accessToken: string): Promise<void> => {
