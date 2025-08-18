@@ -411,12 +411,12 @@ Keycloak detail: ${errorData.error_description}`);
           <div className="login-container">
             <div className="login-card">
               <h2>Přihlášení vyžadováno</h2>
-              <p>Pro přístup do aplikace se musíte přihlásit pomocí Keycloak OIDC.</p>
+              <p>Pro přístup do aplikace se musíte přihlásit pomocí SkodaIDP OIDC.</p>
               
               {process.env.NODE_ENV === 'development' && (
                 <div className="debug-info">
                   <h4>Debug informace:</h4>
-                  <div><strong>Keycloak URL:</strong> {KEYCLOAK_CONFIG.url}</div>
+                  <div><strong>SkodaIDP URL:</strong> {KEYCLOAK_CONFIG.url}</div>
                   <div><strong>Realm:</strong> {KEYCLOAK_CONFIG.realm}</div>
                   <div><strong>Client ID:</strong> {KEYCLOAK_CONFIG.clientId}</div>
                   <div><strong>Scope:</strong> openid profile email roles</div>
@@ -425,7 +425,7 @@ Keycloak detail: ${errorData.error_description}`);
               )}
               
               <button onClick={login} className="btn btn-primary btn-large">
-                🔐 Přihlásit přes Keycloak
+                🔐 Přihlásit přes SkodaIDP
               </button>
               
               {process.env.NODE_ENV === 'development' && (
@@ -443,7 +443,7 @@ Keycloak detail: ${errorData.error_description}`);
           <div className="dashboard">
             <div className="card success-card">
               <h2>🎉 JSTE ÚSPĚŠNĚ PŘIHLÁŠENI!</h2>
-              <p>Vítejte v aplikaci! Přihlášení proběhlo úspěšně pomocí Keycloak OIDC.</p>
+              <p>Vítejte v aplikaci! Přihlášení proběhlo úspěšně pomocí SkodaIDP OIDC.</p>
               
               <div className="user-info">
                 <h3>Vaše informace:</h3>
@@ -461,7 +461,8 @@ Keycloak detail: ${errorData.error_description}`);
               <p>Detaily o vaší aktuální OIDC relaci:</p>
               <div className="auth-details">
                 <div>✅ Autentizace: OIDC/OAuth 2.0</div>
-                <div>✅ Poskytovatel: Keycloak (identity.tskoda.vwgroup.com)</div>
+                <div>✅ Poskytovatel: {KEYCLOAK_CONFIG.url}</div>
+                <div>✅ Realm: {KEYCLOAK_CONFIG.realm}</div>
                 <div>✅ Zabezpečení: SSL/TLS</div>
                 <div>✅ Session: Aktivní</div>
                 <div>✅ Token Type: Bearer</div>
