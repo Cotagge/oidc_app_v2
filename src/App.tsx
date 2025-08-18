@@ -306,6 +306,7 @@ Keycloak detail: ${errorData.error_description}`);
           setUserInfo(parsedUserInfo);
           setIsAuthenticated(true);
           console.log('✅ User info načteny z localStorage');
+          setLoading(false);
         } catch (error) {
           console.error('❌ Chyba při parsování user info:', error);
           // Pokud je token ale user info je poškozené, zkus znovu načíst
@@ -320,7 +321,7 @@ Keycloak detail: ${errorData.error_description}`);
       console.log('❌ Žádný token nenalezen');
       setLoading(false);
     }
-  }, [fetchUserInfo]); // Přidáno fetchUserInfo do dependencies
+  }, [fetchUserInfo]);
 
   const login = (): void => {
     console.log('🔐 Zahajuji přihlášení...');
@@ -473,8 +474,8 @@ Keycloak detail: ${errorData.error_description}`);
               <p>Detaily o vaší aktuální OIDC relaci:</p>
               <div className="auth-details">
                 <div>✅ Autentizace: OIDC/OAuth 2.0</div>
-                <div>✅ Poskytovatel: { KEYCLOAK_CONFIG.url } </div>
-                <div>✅ Realm: { KEYCLOAK_CONFIG.realm }</div>
+                <div>✅ Poskytovatel: {KEYCLOAK_CONFIG.url}</div>
+                <div>✅ Realm: {KEYCLOAK_CONFIG.realm}</div>
                 <div>✅ Zabezpečení: SSL/TLS</div>
                 <div>✅ Session: Aktivní</div>
                 <div>✅ Token Type: Bearer</div>
