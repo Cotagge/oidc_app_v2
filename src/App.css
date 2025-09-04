@@ -90,6 +90,35 @@
   text-align: center;
 }
 
+/* Login card footer */
+.login-card-footer {
+  background: white;
+  border-radius: 0 0 16px 16px;
+  padding: 20px 40px;
+  margin: 0 -40px -40px -40px;
+  border-top: 1px solid #e2e8f0;
+  text-align: center;
+}
+
+.metadata-link {
+  color: #4a5568;
+  text-decoration: none;
+  font-size: 14px;
+  font-weight: 500;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 16px;
+  border-radius: 8px;
+  transition: all 0.2s ease;
+}
+
+.metadata-link:hover {
+  background: #f7fafc;
+  color: #48bb78;
+  text-decoration: none;
+}
+
 .login-card h2 {
   margin: 0 0 8px 0;
   color: #2d3748;
@@ -559,5 +588,10 @@ code {
   
   .info-label {
     font-weight: 700;
+  }
+  
+  .login-card-footer {
+    margin: 0 -24px -32px -24px;
+    padding: 16px 24px;
   }
 }

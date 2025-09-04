@@ -441,11 +441,13 @@ const App: React.FC = () => {
                 </div>
               )}
             </div>
-          
-            {/* Footer with metadata link */}
-            <footer className="footer-links">
-              <a href={wellKnownUrl} target="_blank" rel="noreferrer">OpenID Connect metadata</a>
-            </footer>
+
+            {/* Footer integrated into card */}
+            <div className="login-card-footer">
+              <a href={wellKnownUrl} target="_blank" rel="noreferrer" className="metadata-link">
+                📄 OpenID Connect Metadata
+              </a>
+            </div>
           </div>
         ) : (
           <div className="login-container">
@@ -520,10 +522,12 @@ const App: React.FC = () => {
               )}
             </div>
 
-            {/* Footer with metadata link */}
-            <footer className="footer-links">
-              <a href={wellKnownUrl} target="_blank" rel="noreferrer">OpenID Connect metadata</a>
-            </footer>
+            {/* Footer integrated into card */}
+            <div className="login-card-footer">
+              <a href={wellKnownUrl} target="_blank" rel="noreferrer" className="metadata-link">
+                📄 OpenID Connect Metadata
+              </a>
+            </div>
           </div>
         )}
       </main>
