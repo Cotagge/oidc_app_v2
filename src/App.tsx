@@ -427,7 +427,7 @@ const App: React.FC = () => {
             <div className="skoda-logo">ŠKODA</div>
 
             <div className="login-card">
-              <h2>Login with employee account (LDAP)</h2>
+              <h2>Login to Demo app</h2>
               <p className="login-subtitle">Přihlaste se pomocí svého zaměstnaneckého účtu</p>
 
               {/* Authentication buttons */}
