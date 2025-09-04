@@ -339,7 +339,11 @@ const App: React.FC = () => {
     }
   }, [KEYCLOAK_CONFIG, generateCodeVerifier, generateCodeChallenge]);
 
-  const logout = (): void => {
+  const logout = useCallback(async (): Promise<void> => {
+    const accessToken = localStorage.getItem('access_token');
+    const refreshToken = localStorage.getItem('refresh_token');
+    
+    // Vyčistit lokální data ihned
     localStorage.removeItem('access_token');
     localStorage.removeItem('refresh_token');
     localStorage.removeItem('id_token');
@@ -348,10 +352,37 @@ const App: React.FC = () => {
     localStorage.removeItem('code_verifier');
     localStorage.removeItem('code_challenge');
     localStorage.removeItem('used_client_type');
+    
+    // Aktualizovat stav aplikace ihned
     setIsAuthenticated(false);
     setUserInfo(null);
     setUsedClientType(null);
-  };
+    
+    // Provést backchannel logout na pozadí
+    if (refreshToken) {
+      try {
+        const logoutUrl = `${KEYCLOAK_CONFIG.url}/realms/${KEYCLOAK_CONFIG.realm}/protocol/openid-connect/logout`;
+        const clientId = usedClientType === '2FA' ? KEYCLOAK_CONFIG.clientId2F : KEYCLOAK_CONFIG.clientId1F;
+        
+        await fetch(logoutUrl, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/x-www-form-urlencoded',
+            ...(accessToken ? { 'Authorization': `Bearer ${accessToken}` } : {})
+          },
+          body: new URLSearchParams({
+            client_id: clientId,
+            refresh_token: refreshToken
+          })
+        });
+        
+        console.log('Backchannel logout úspěšný');
+      } catch (error) {
+        console.warn('Backchannel logout selhal (ale lokální logout proběhl):', error);
+        // Nespadneme - lokální logout už proběhl
+      }
+    }
+  }, [KEYCLOAK_CONFIG, usedClientType]);
 
   // Debug funkce pro smazání všech dat
   const clearAllData = (): void => {
@@ -382,14 +413,6 @@ const App: React.FC = () => {
 
   return (
     <div className="app">
-      {/* Language selector */}
-      <div className="language-selector">
-        <select className="language-dropdown" defaultValue="cs">
-          <option value="cs">Čeština</option>
-          <option value="en">English</option>
-        </select>
-      </div>
-
       {/* Logout button for authenticated users */}
       {isAuthenticated && (
         <button onClick={logout} className="logout-button">
@@ -440,13 +463,6 @@ const App: React.FC = () => {
                   </button>
                 </div>
               )}
-            </div>
-
-            {/* Footer integrated into card */}
-            <div className="login-card-footer">
-              <a href={wellKnownUrl} target="_blank" rel="noreferrer" className="metadata-link">
-                📄 OpenID Connect Metadata
-              </a>
             </div>
           </div>
         ) : (
@@ -520,13 +536,6 @@ const App: React.FC = () => {
                   <div><strong>Metadata:</strong> <a href={wellKnownUrl} target="_blank" rel="noreferrer">.well-known</a></div>
                 </div>
               )}
-            </div>
-
-            {/* Footer integrated into card */}
-            <div className="login-card-footer">
-              <a href={wellKnownUrl} target="_blank" rel="noreferrer" className="metadata-link">
-                📄 OpenID Connect Metadata
-              </a>
             </div>
           </div>
         )}
