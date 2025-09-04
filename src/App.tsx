@@ -5,33 +5,69 @@ import './App.css';
 interface UserInfo {
   name: string;
   email: string;
-  roles: string[];
   preferred_username?: string;
   given_name?: string;
   family_name?: string;
   sub?: string;
-  acr?: string; // <-- přidáno pro LoA
+  acr?: string;
 }
 
 // TypeScript interface pro Keycloak konfiguraci
 interface KeycloakConfig {
   url: string;
   realm: string;
-  clientId: string;
+  clientId1F: string;  // Pro 1FA
+  clientId2F: string;  // Pro 2FA
 }
 
 const App: React.FC = () => {
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
   const [userInfo, setUserInfo] = useState<UserInfo | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
-  const [stepUpDone, setStepUpDone] = useState<boolean>(false);
+  const [usedClientType, setUsedClientType] = useState<'1FA' | '2FA' | null>(null);
 
   // Konfigurace pro Keycloak - použije environment variables
   const KEYCLOAK_CONFIG: KeycloakConfig = useMemo(() => ({
     url: process.env.REACT_APP_KEYCLOAK_URL || 'https://your-keycloak-server.com',
     realm: process.env.REACT_APP_KEYCLOAK_REALM || 'your-realm',
-    clientId: process.env.REACT_APP_KEYCLOAK_CLIENT_ID || 'your-client-id'
+    clientId1F: process.env.REACT_APP_KEYCLOAK_CLIENT_ID_1F || 'test-client-oidc-demo-1f',  // 1FA klient z .env
+    clientId2F: process.env.REACT_APP_KEYCLOAK_CLIENT_ID_2F || 'test-client-oidc-demo-2f'   // 2FA klient z .env
   }), []);
+
+  // URL pro metadata (.well-known) - opravený standardní endpoint
+  const wellKnownUrl = `${KEYCLOAK_CONFIG.url}/realms/${KEYCLOAK_CONFIG.realm}/.well-known/openid-configuration`;
+
+  // PKCE helper funkce
+  const generateCodeVerifier = useCallback((): string => {
+    const array = new Uint8Array(32);
+    crypto.getRandomValues(array);
+    // Konverze bez spread operátoru pro kompatibilitu
+    let result = '';
+    for (let i = 0; i < array.length; i++) {
+      result += String.fromCharCode(array[i]);
+    }
+    return btoa(result)
+      .replace(/=/g, '')
+      .replace(/\+/g, '-')
+      .replace(/\//g, '_');
+  }, []);
+
+  const generateCodeChallenge = useCallback(async (verifier: string): Promise<string> => {
+    const encoder = new TextEncoder();
+    const data = encoder.encode(verifier);
+    const digest = await crypto.subtle.digest('SHA-256', data);
+    const hashArray = new Uint8Array(digest);
+    
+    // Konverze bez spread operátoru pro kompatibilitu
+    let result = '';
+    for (let i = 0; i < hashArray.length; i++) {
+      result += String.fromCharCode(hashArray[i]);
+    }
+    return btoa(result)
+      .replace(/=/g, '')
+      .replace(/\+/g, '-')
+      .replace(/\//g, '_');
+  }, []);
 
   // Získání user info z UserInfo endpointu (fallback)
   const fetchUserInfo = useCallback(async (accessToken: string): Promise<void> => {
@@ -54,7 +90,6 @@ const App: React.FC = () => {
         given_name: userData.given_name || 'N/A',
         family_name: userData.family_name || 'N/A',
         sub: userData.sub || 'N/A',
-        roles: userData.realm_access?.roles || userData.groups || [],
         acr: userData.acr || 'N/A'
       });
       localStorage.setItem('user_info', JSON.stringify({
@@ -64,7 +99,6 @@ const App: React.FC = () => {
         given_name: userData.given_name || 'N/A',
         family_name: userData.family_name || 'N/A',
         sub: userData.sub || 'N/A',
-        roles: userData.realm_access?.roles || userData.groups || [],
         acr: userData.acr || 'N/A'
       }));
       window.history.replaceState({}, document.title, window.location.pathname);
@@ -81,7 +115,6 @@ const App: React.FC = () => {
           given_name: 'Test',
           family_name: 'Uživatel',
           sub: 'localhost-test-user',
-          roles: ['user'],
           acr: 'N/A'
         });
         window.history.replaceState({}, document.title, window.location.pathname);
@@ -109,7 +142,6 @@ const App: React.FC = () => {
         given_name: payload.given_name || 'N/A',
         family_name: payload.family_name || 'N/A',
         sub: payload.sub || 'N/A',
-        roles: payload.realm_access?.roles || payload.groups || payload.roles || [],
         acr: payload.acr || 'N/A'
       });
       localStorage.setItem('user_info', JSON.stringify({
@@ -119,7 +151,6 @@ const App: React.FC = () => {
         given_name: payload.given_name || 'N/A',
         family_name: payload.family_name || 'N/A',
         sub: payload.sub || 'N/A',
-        roles: payload.realm_access?.roles || payload.groups || payload.roles || [],
         acr: payload.acr || 'N/A'
       }));
       window.history.replaceState({}, document.title, window.location.pathname);
@@ -135,17 +166,34 @@ const App: React.FC = () => {
     }
   }, [fetchUserInfo]);
 
-  // Výměna code za token
-  const exchangeCodeForToken = useCallback(async (code: string): Promise<void> => {
+  // Výměna code za token s PKCE
+  const exchangeCodeForToken = useCallback(async (code: string, clientType: '1FA' | '2FA'): Promise<void> => {
     try {
       const tokenUrl = `${KEYCLOAK_CONFIG.url}/realms/${KEYCLOAK_CONFIG.realm}/protocol/openid-connect/token`;
-      const redirectUri = window.location.origin;
+      // Použít stejný redirect_uri jako při authorization requestu
+      const redirectUri = `${window.location.origin}?client_type=${clientType}`;
+      const clientId = clientType === '2FA' ? KEYCLOAK_CONFIG.clientId2F : KEYCLOAK_CONFIG.clientId1F;
+      
+      const codeVerifier = localStorage.getItem('code_verifier');
+      
+      if (!codeVerifier) {
+        throw new Error('Code verifier not found in localStorage');
+      }
+
       const requestBody = new URLSearchParams({
         grant_type: 'authorization_code',
-        client_id: KEYCLOAK_CONFIG.clientId,
+        client_id: clientId,
         code: code,
-        redirect_uri: redirectUri
+        redirect_uri: redirectUri,  // Stejný jako v auth requestu
+        code_verifier: codeVerifier
       });
+
+      console.log('Token exchange request:', {
+        client_id: clientId,
+        redirect_uri: redirectUri,
+        code: code.substring(0, 10) + '...' // Zkrácený kód pro debug
+      });
+
       const tokenResponse = await fetch(tokenUrl, {
         method: 'POST',
         headers: { 
@@ -153,14 +201,31 @@ const App: React.FC = () => {
         },
         body: requestBody
       });
+
       if (!tokenResponse.ok) {
-        const errorData = await tokenResponse.json();
-        throw new Error(`Token request failed: ${tokenResponse.status} ${errorData.error}: ${errorData.error_description}`);
+        let errorData = {};
+        try { 
+          errorData = await tokenResponse.json(); 
+        } catch { 
+          /* ignore */ 
+        }
+        console.error('Token request failed:', errorData);
+        throw new Error(`Token request failed: ${tokenResponse.status} ${JSON.stringify(errorData)}`);
       }
+
       const tokens = await tokenResponse.json();
       localStorage.setItem('access_token', tokens.access_token);
       if (tokens.id_token) localStorage.setItem('id_token', tokens.id_token);
       if (tokens.refresh_token) localStorage.setItem('refresh_token', tokens.refresh_token);
+      
+      // Uložit typ klienta
+      localStorage.setItem('used_client_type', clientType);
+      setUsedClientType(clientType);
+      
+      // Vyčistit PKCE data
+      localStorage.removeItem('code_verifier');
+      localStorage.removeItem('code_challenge');
+
       if (tokens.id_token) {
         parseUserInfoFromIdToken(tokens.id_token);
       } else {
@@ -178,8 +243,11 @@ const App: React.FC = () => {
     const urlParams = new URLSearchParams(window.location.search);
     const code = urlParams.get('code');
     const error = urlParams.get('error');
+    const errorDescription = urlParams.get('error_description');
+    const clientType = urlParams.get('client_type') as '1FA' | '2FA' || '1FA';
+    
     if (error) {
-      alert(`Chyba při přihlášení: ${error}`);
+      alert(`Chyba při přihlášení: ${error}\n${errorDescription || ''}`);
       setLoading(false);
       return;
     }
@@ -190,7 +258,7 @@ const App: React.FC = () => {
         return;
       }
       localStorage.setItem('used_auth_code', code);
-      exchangeCodeForToken(code);
+      exchangeCodeForToken(code, clientType);
       return;
     }
     setLoading(false);
@@ -200,11 +268,13 @@ const App: React.FC = () => {
     const token = localStorage.getItem('access_token');
     if (token) {
       const storedUserInfo = localStorage.getItem('user_info');
+      const storedClientType = localStorage.getItem('used_client_type') as '1FA' | '2FA' || '1FA';
       if (storedUserInfo) {
         try {
           const parsedUserInfo = JSON.parse(storedUserInfo);
           setUserInfo(parsedUserInfo);
           setIsAuthenticated(true);
+          setUsedClientType(storedClientType);
           setLoading(false);
         } catch (error) {
           fetchUserInfo(token);
@@ -217,16 +287,57 @@ const App: React.FC = () => {
     }
   }, [fetchUserInfo]);
 
-  const login = (): void => {
-    const redirectUri = window.location.origin;
-    const authUrl = `${KEYCLOAK_CONFIG.url}/realms/${KEYCLOAK_CONFIG.realm}/protocol/openid-connect/auth` +
-      `?client_id=${KEYCLOAK_CONFIG.clientId}` +
-      `&redirect_uri=${encodeURIComponent(redirectUri)}` +
-      `&response_type=code` +
-      `&scope=openid profile email roles` +
-      `&state=${Date.now()}`;
-    window.location.href = authUrl;
-  };
+  // Přihlášení s 1FA klientem s PKCE
+  const loginWith1FA = useCallback(async (): Promise<void> => {
+    try {
+      const codeVerifier = generateCodeVerifier();
+      const codeChallenge = await generateCodeChallenge(codeVerifier);
+      
+      // Uložit pro pozdější použití při token exchange
+      localStorage.setItem('code_verifier', codeVerifier);
+      localStorage.setItem('code_challenge', codeChallenge);
+
+      const redirectUri = `${window.location.origin}?client_type=1FA`;
+      const authUrl = `${KEYCLOAK_CONFIG.url}/realms/${KEYCLOAK_CONFIG.realm}/protocol/openid-connect/auth` +
+        `?client_id=${encodeURIComponent(KEYCLOAK_CONFIG.clientId1F)}` +
+        `&redirect_uri=${encodeURIComponent(redirectUri)}` +
+        `&response_type=code` +
+        `&scope=openid profile email` +
+        `&code_challenge=${codeChallenge}` +
+        `&code_challenge_method=S256` +
+        `&state=${Date.now()}`;
+      
+      window.location.href = authUrl;
+    } catch (error) {
+      alert('Chyba při přípravě přihlášení: ' + (error instanceof Error ? error.message : 'Neznámá chyba'));
+    }
+  }, [KEYCLOAK_CONFIG, generateCodeVerifier, generateCodeChallenge]);
+
+  // Přihlášení s 2FA klientem s PKCE
+  const loginWith2FA = useCallback(async (): Promise<void> => {
+    try {
+      const codeVerifier = generateCodeVerifier();
+      const codeChallenge = await generateCodeChallenge(codeVerifier);
+      
+      // Uložit pro pozdější použití při token exchange
+      localStorage.setItem('code_verifier', codeVerifier);
+      localStorage.setItem('code_challenge', codeChallenge);
+
+      const redirectUri = `${window.location.origin}?client_type=2FA`;
+      const authUrl = `${KEYCLOAK_CONFIG.url}/realms/${KEYCLOAK_CONFIG.realm}/protocol/openid-connect/auth` +
+        `?client_id=${encodeURIComponent(KEYCLOAK_CONFIG.clientId2F)}` +
+        `&redirect_uri=${encodeURIComponent(redirectUri)}` +
+        `&response_type=code` +
+        `&scope=openid profile email` +
+        `&code_challenge=${codeChallenge}` +
+        `&code_challenge_method=S256` +
+        `&state=${Date.now()}`;
+      
+      window.location.href = authUrl;
+    } catch (error) {
+      alert('Chyba při přípravě přihlášení: ' + (error instanceof Error ? error.message : 'Neznámá chyba'));
+    }
+  }, [KEYCLOAK_CONFIG, generateCodeVerifier, generateCodeChallenge]);
 
   const logout = (): void => {
     localStorage.removeItem('access_token');
@@ -234,21 +345,12 @@ const App: React.FC = () => {
     localStorage.removeItem('id_token');
     localStorage.removeItem('user_info');
     localStorage.removeItem('used_auth_code');
+    localStorage.removeItem('code_verifier');
+    localStorage.removeItem('code_challenge');
+    localStorage.removeItem('used_client_type');
     setIsAuthenticated(false);
     setUserInfo(null);
-  };
-
-  // Funkce pro step-up autentizaci (vyšší úroveň ověření)
-  const stepUpAuth = (): void => {
-    const redirectUri = window.location.origin + "?stepup=1";
-    const authUrl = `${KEYCLOAK_CONFIG.url}/realms/${KEYCLOAK_CONFIG.realm}/protocol/openid-connect/auth` +
-      `?client_id=${KEYCLOAK_CONFIG.clientId}` +
-      `&redirect_uri=${encodeURIComponent(redirectUri)}` +
-      `&response_type=code` +
-      `&scope=openid` +
-      `&acr_values=medium` +
-      `&state=${Date.now()}`;
-    window.location.href = authUrl;
+    setUsedClientType(null);
   };
 
   // Debug funkce pro smazání všech dat
@@ -269,14 +371,6 @@ const App: React.FC = () => {
     }
   }, [parseKeycloakCallback, checkAuthStatus]);
 
-  // Po návratu z Keycloaku zjisti, zda šlo o step-up
-  useEffect(() => {
-    const urlParams = new URLSearchParams(window.location.search);
-    if (urlParams.get("stepup") === "1") {
-      setStepUpDone(true);
-    }
-  }, [isAuthenticated]);
-
   if (loading) {
     return (
       <div className="loading-container">
@@ -288,103 +382,148 @@ const App: React.FC = () => {
 
   return (
     <div className="app">
-      <nav className="navbar">
-        <div className="nav-content">
-          <div className="nav-left">
-            <h1>OIDC Demo App</h1>
-            {process.env.NODE_ENV === 'development' && (
-              <span className="demo-badge">Demo Mode</span>
-            )}
-          </div>
-          <div className="nav-right">
-            {isAuthenticated ? (
-              <>
-                <span className="user-greeting">Vítej, {userInfo?.name}</span>
-                <button onClick={logout} className="btn btn-danger">
-                  Odhlásit se
-                </button>
-              </>
-            ) : (
-              <button onClick={login} className="btn btn-primary">
-                Přihlásit se
-              </button>
-            )}
-          </div>
-        </div>
-      </nav>
+      {/* Language selector */}
+      <div className="language-selector">
+        <select className="language-dropdown" defaultValue="cs">
+          <option value="cs">Čeština</option>
+          <option value="en">English</option>
+        </select>
+      </div>
+
+      {/* Logout button for authenticated users */}
+      {isAuthenticated && (
+        <button onClick={logout} className="logout-button">
+          Odhlásit se
+        </button>
+      )}
 
       <main className="main-content">
         {!isAuthenticated ? (
           <div className="login-container">
+            {/* ŠKODA Logo */}
+            <div className="skoda-logo">ŠKODA</div>
+
             <div className="login-card">
-              <h2>Přihlášení vyžadováno</h2>
-              <p>Pro přístup do aplikace se musíte přihlásit pomocí SkodaIDP OIDC.</p>
+              <h2>Login with employee account (LDAP)</h2>
+              <p className="login-subtitle">Přihlaste se pomocí svého zaměstnaneckého účtu</p>
+
+              {/* Authentication buttons */}
+              <div className="auth-buttons">
+                <button onClick={loginWith1FA} className="btn-auth btn-auth-primary">
+                  <span>🔐</span>
+                  Přihlásit se (1FA)
+                </button>
+                
+                <button onClick={loginWith2FA} className="btn-auth btn-auth-warning">
+                  <span>🔒</span>
+                  Přihlásit se (2FA)
+                </button>
+              </div>
+
+              {/* Debug info for development */}
               {process.env.NODE_ENV === 'development' && (
                 <div className="debug-info">
                   <h4>Debug informace:</h4>
                   <div><strong>SkodaIDP URL:</strong> {KEYCLOAK_CONFIG.url}</div>
                   <div><strong>Realm:</strong> {KEYCLOAK_CONFIG.realm}</div>
-                  <div><strong>Client ID:</strong> {KEYCLOAK_CONFIG.clientId}</div>
-                  <div><strong>Scope:</strong> openid profile email roles</div>
-                  <div><strong>Response Type:</strong> code (Authorization Code Flow)</div>
+                  <div><strong>1FA Client ID:</strong> {KEYCLOAK_CONFIG.clientId1F}</div>
+                  <div><strong>2FA Client ID:</strong> {KEYCLOAK_CONFIG.clientId2F}</div>
+                  <div><strong>Scope:</strong> openid profile email</div>
+                  <div><strong>Response Type:</strong> code (Authorization Code Flow s PKCE)</div>
+                  <div><strong>PKCE Method:</strong> S256 (SHA256)</div>
+                  <div><strong>Metadata:</strong> <a href={wellKnownUrl} target="_blank" rel="noreferrer">.well-known</a></div>
+                  <button 
+                    onClick={clearAllData} 
+                    className="btn-auth btn-auth-secondary mt-4"
+                  >
+                    🧹 Smazat všechna data (debug)
+                  </button>
                 </div>
               )}
-              <button onClick={login} className="btn btn-primary btn-large">
-                🔐 Přihlásit přes SkodaIDP
-              </button>
-              {process.env.NODE_ENV === 'development' && (
-                <button 
-                  onClick={clearAllData} 
-                  className="btn btn-danger"
-                  style={{marginTop: '16px', fontSize: '14px'}}
-                >
-                  🧹 Smazat všechna data (debug)
-                </button>
-              )}
             </div>
-          </div>
-        ) : stepUpDone ? (
-          <div className="dashboard">
-            <div className="card success-card">
-              <h2>✅ Jste autentizováni druhým faktorem!</h2>
-              <p>Vaše aktuální úroveň ověření (acr): <code>{userInfo?.acr || 'N/A'}</code></p>
-              <button onClick={() => setStepUpDone(false)} className="btn btn-secondary" style={{marginTop: '16px'}}>
-                Zpět do aplikace
-              </button>
-            </div>
+          
+            {/* Footer with metadata link */}
+            <footer className="footer-links">
+              <a href={wellKnownUrl} target="_blank" rel="noreferrer">OpenID Connect metadata</a>
+            </footer>
           </div>
         ) : (
-          <div className="dashboard">
-            <div className="card success-card">
-              <h2>🎉 JSTE ÚSPĚŠNĚ PŘIHLÁŠENI!</h2>
-              <p>Vítejte v aplikaci! Přihlášení proběhlo úspěšně pomocí SkodaIDP OIDC.</p>
-              <button onClick={stepUpAuth} className="btn btn-warning" style={{marginTop: '16px'}}>
-                🔒 Vyžádat vyšší úroveň ověření (step-up)
-              </button>
-              <div className="user-info">
-                <h3>Vaše informace:</h3>
-                <div><strong>Celé jméno:</strong> {userInfo?.name}</div>
-                <div><strong>Username:</strong> {userInfo?.preferred_username}</div>
-                <div><strong>Email:</strong> {userInfo?.email}</div>
-                <div><strong>Role:</strong> {userInfo?.roles?.join(', ')}</div>
-                <div><strong>User ID:</strong> <code>{userInfo?.sub || 'N/A'}</code></div>
-                <div><strong>Aktuální LoA (acr):</strong> <code>{userInfo?.acr || 'N/A'}</code></div>
-                <div><strong>Stav:</strong> <span className="status-active">✅ Aktivní relace</span></div>
+          <div className="login-container">
+            {/* ŠKODA Logo */}
+            <div className="skoda-logo">ŠKODA</div>
+
+            <div className="login-card">
+              <h2>✅ Úspěšně přihlášen</h2>
+              <p className="login-subtitle">Vítejte v aplikaci, {userInfo?.name}!</p>
+
+              <div className="user-info-section">
+                <h3>Informace o uživateli</h3>
+                <div className="info-grid">
+                  <div className="info-item">
+                    <span className="info-label">Celé jméno:</span>
+                    <span className="info-value">{userInfo?.name}</span>
+                  </div>
+                  <div className="info-item">
+                    <span className="info-label">Email:</span>
+                    <span className="info-value">{userInfo?.email}</span>
+                  </div>
+                  <div className="info-item">
+                    <span className="info-label">Uživatelské jméno:</span>
+                    <span className="info-value">{userInfo?.preferred_username}</span>
+                  </div>
+                  <div className="info-item">
+                    <span className="info-label">ACR Level:</span>
+                    <span className="info-value">
+                      <code>{userInfo?.acr}</code>
+                      {usedClientType && (
+                        <span className={`auth-badge ${usedClientType === '1FA' ? 'auth-1fa' : 'auth-2fa'}`}>
+                          {usedClientType} Client
+                        </span>
+                      )}
+                    </span>
+                  </div>
+                  <div className="info-item">
+                    <span className="info-label">Použitý klient:</span>
+                    <span className="info-value status-active">
+                      ✅ {usedClientType === '1FA' ? KEYCLOAK_CONFIG.clientId1F : KEYCLOAK_CONFIG.clientId2F}
+                    </span>
+                  </div>
+                  <div className="info-item">
+                    <span className="info-label">Stav relace:</span>
+                    <span className="info-value status-active">✅ Aktivní</span>
+                  </div>
+                </div>
               </div>
-            </div>
-            <div className="card">
-              <h3>🔐 Informace o přihlášení</h3>
-              <p>Detaily o vaší aktuální OIDC relaci:</p>
-              <div className="auth-details">
-                <div>✅ Autentizace: OIDC/OAuth 2.0</div>
-                <div>✅ Poskytovatel: SkodaIDP ({KEYCLOAK_CONFIG.url})</div>
-                <div>✅ Realm: {KEYCLOAK_CONFIG.realm}</div>
-                <div>✅ Zabezpečení: SSL/TLS</div>
-                <div>✅ Session: Aktivní</div>
-                <div>✅ Token Type: Bearer</div>
-                <div>✅ Scope: openid profile email roles</div>
+
+              {/* Action buttons */}
+              <div className="auth-buttons">
+                <button onClick={logout} className="btn-auth btn-auth-primary">
+                  <span>👋</span>
+                  Odhlásit se
+                </button>
+                
+                <button onClick={clearAllData} className="btn-auth btn-auth-secondary">
+                  <span>🧹</span>
+                  Vymazat data
+                </button>
               </div>
+
+              {/* Debug info for development */}
+              {process.env.NODE_ENV === 'development' && (
+                <div className="debug-info">
+                  <h4>Debug informace:</h4>
+                  <div><strong>Sub:</strong> {userInfo?.sub}</div>
+                  <div><strong>Použitý Client:</strong> {usedClientType === '1FA' ? KEYCLOAK_CONFIG.clientId1F : KEYCLOAK_CONFIG.clientId2F}</div>
+                  <div><strong>Realm:</strong> {KEYCLOAK_CONFIG.realm}</div>
+                  <div><strong>Metadata:</strong> <a href={wellKnownUrl} target="_blank" rel="noreferrer">.well-known</a></div>
+                </div>
+              )}
             </div>
+
+            {/* Footer with metadata link */}
+            <footer className="footer-links">
+              <a href={wellKnownUrl} target="_blank" rel="noreferrer">OpenID Connect metadata</a>
+            </footer>
           </div>
         )}
       </main>
