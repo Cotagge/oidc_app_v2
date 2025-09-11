@@ -10,6 +10,7 @@ interface UserInfo {
   family_name?: string;
   sub?: string;
   acr?: string;
+  amr?: string[];
 }
 
 // TypeScript interface pro Keycloak konfiguraci
@@ -92,7 +93,8 @@ const App: React.FC = () => {
         given_name: userData.given_name || 'N/A',
         family_name: userData.family_name || 'N/A',
         sub: userData.sub || 'N/A',
-        acr: userData.acr || 'N/A'
+        acr: userData.acr || 'N/A',
+        amr: userData.amr || []
       });
       localStorage.setItem('user_info', JSON.stringify({
         name: userData.name || `${userData.given_name || ''} ${userData.family_name || ''}`.trim() || userData.preferred_username || 'Neznámý uživatel',
@@ -101,7 +103,8 @@ const App: React.FC = () => {
         given_name: userData.given_name || 'N/A',
         family_name: userData.family_name || 'N/A',
         sub: userData.sub || 'N/A',
-        acr: userData.acr || 'N/A'
+        acr: userData.acr || 'N/A',
+        amr: userData.amr || []
       }));
       window.history.replaceState({}, document.title, window.location.pathname);
       localStorage.removeItem('used_auth_code');
@@ -117,7 +120,8 @@ const App: React.FC = () => {
           given_name: 'Test',
           family_name: 'Uživatel',
           sub: 'localhost-test-user',
-          acr: 'N/A'
+          acr: 'N/A',
+          amr: ['pwd']
         });
         window.history.replaceState({}, document.title, window.location.pathname);
         setLoading(false);
@@ -144,7 +148,8 @@ const App: React.FC = () => {
         given_name: payload.given_name || 'N/A',
         family_name: payload.family_name || 'N/A',
         sub: payload.sub || 'N/A',
-        acr: payload.acr || 'N/A'
+        acr: payload.acr || 'N/A',
+        amr: payload.amr || []
       });
       localStorage.setItem('user_info', JSON.stringify({
         name: payload.name || `${payload.given_name || ''} ${payload.family_name || ''}`.trim() || payload.preferred_username || 'Neznámý uživatel',
@@ -153,7 +158,8 @@ const App: React.FC = () => {
         given_name: payload.given_name || 'N/A',
         family_name: payload.family_name || 'N/A',
         sub: payload.sub || 'N/A',
-        acr: payload.acr || 'N/A'
+        acr: payload.acr || 'N/A',
+        amr: payload.amr || []
       }));
       window.history.replaceState({}, document.title, window.location.pathname);
       localStorage.removeItem('used_auth_code');
@@ -414,6 +420,32 @@ const App: React.FC = () => {
     }
   }, [KEYCLOAK_CONFIG, usedClientType]);
 
+  // Funkce pro formátování AMR hodnot
+  const formatAMR = useCallback((amr: string[]): string => {
+    if (!amr || amr.length === 0) return 'N/A';
+    
+    const amrMappings: { [key: string]: string } = {
+      'pwd': 'Heslo',
+      'sms': 'SMS kód',
+      'otp': 'OTP token', 
+      'mfa': 'Multifaktor',
+      'sc': 'Smart Card',
+      'bio': 'Biometrie',
+      'fpt': 'Otisk prstu',
+      'pin': 'PIN kód',
+      'kba': 'Znalosti (KBA)',
+      'tel': 'Telefon',
+      'geo': 'Geolokace',
+      'face': 'Rozpoznání obličeje',
+      'iris': 'Sken očí',
+      'voice': 'Hlas',
+      'swk': 'Software klíč',
+      'hwk': 'Hardware klíč'
+    };
+    
+    return amr.map(method => amrMappings[method] || method.toUpperCase()).join(', ');
+  }, []);
+
   // Debug funkce pro smazání všech dat
   const clearAllData = (): void => {
     localStorage.clear();
@@ -537,6 +569,17 @@ const App: React.FC = () => {
                     </span>
                   </div>
                   <div className="info-item">
+                    <span className="info-label">AMR (Metody ověření):</span>
+                    <span className="info-value">
+                      <code>{formatAMR(userInfo?.amr || [])}</code>
+                      {userInfo?.amr && userInfo.amr.length > 0 && (
+                        <span className="amr-details">
+                          [{userInfo.amr.join(', ')}]
+                        </span>
+                      )}
+                    </span>
+                  </div>
+                  <div className="info-item">
                     <span className="info-label">Použitý klient:</span>
                     <span className="info-value status-active">
                       ✅ {usedClientType === '3FA' ? KEYCLOAK_CONFIG.clientId3F :
@@ -568,6 +611,8 @@ const App: React.FC = () => {
                 <div className="debug-info">
                   <h4>Debug informace:</h4>
                   <div><strong>Sub:</strong> {userInfo?.sub}</div>
+                  <div><strong>ACR:</strong> {userInfo?.acr}</div>
+                  <div><strong>AMR:</strong> {userInfo?.amr ? JSON.stringify(userInfo.amr) : 'N/A'}</div>
                   <div><strong>Použitý Client:</strong> {usedClientType === '3FA' ? KEYCLOAK_CONFIG.clientId3F :
                                                       usedClientType === '2FA' ? KEYCLOAK_CONFIG.clientId2F : KEYCLOAK_CONFIG.clientId1F}</div>
                   <div><strong>Realm:</strong> {KEYCLOAK_CONFIG.realm}</div>
